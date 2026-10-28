@@ -1,0 +1,8 @@
+{
+  "panel_domain": "panel.example.com",
+  "origin_base_url": "http://203.0.113.10:18080",
+  "timezone": "Asia/Baku",
+  "secondary_storage": false,
+  "origin_allow": ["127.0.0.1"],
+  "admin_username": "admin"
+}

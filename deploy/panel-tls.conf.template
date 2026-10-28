@@ -1,0 +1,43 @@
+# Enable only after the DNS record and a trusted TLS certificate are ready.
+limit_req_zone $binary_remote_addr zone=cyrius_panel_login:1m rate=6r/m;
+server {
+    listen 80;
+    listen [::]:80;
+    server_name @PANEL_DOMAIN@;
+    location /.well-known/acme-challenge/ { root /var/www/cyrius-acme; }
+    location / { return 301 https://@PANEL_DOMAIN@$request_uri; }
+}
+server {
+    listen 443 ssl;
+    listen [::]:443 ssl;
+    server_name @PANEL_DOMAIN@;
+    server_tokens off;
+    ssl_certificate /etc/letsencrypt/live/@PANEL_DOMAIN@/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/@PANEL_DOMAIN@/privkey.pem;
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_session_cache shared:CYRIUSPanelTLS:5m;
+    client_max_body_size 6m;
+    access_log /var/log/nginx/cyrius-panel-access.log;
+    error_log /var/log/nginx/cyrius-panel-error.log warn;
+    add_header Strict-Transport-Security "max-age=15552000" always;
+    location = /api/login {
+        limit_req zone=cyrius_panel_login burst=5 nodelay;
+        proxy_pass http://127.0.0.1:8890;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-Proto https;
+    }
+    location ~ ^/_streams/([1-7])/(.*)$ {
+        internal;
+        alias /srv/cyrius/public-copy/$1/live/$2;
+        add_header Cache-Control "no-cache";
+        types { application/vnd.apple.mpegurl m3u8; video/mp2t ts; video/iso.segment m4s; video/mp4 mp4; }
+    }
+    location / {
+        proxy_pass http://127.0.0.1:8890;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-Proto https;
+        proxy_read_timeout 60s;
+    }
+}
