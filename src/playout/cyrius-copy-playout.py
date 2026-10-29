@@ -17,6 +17,7 @@ sys.path.insert(0, '/usr/local/libexec')
 from cyrius_branding import branding_args
 from cyrius_picture import picture_crop
 from cyrius_caption import caption_asset
+from cyrius_audio import audio_args, output_audio
 from cyrius_queue import arrange as arrange_queue, policy as queue_policy, command as queue_command, acknowledge as queue_ack
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
@@ -363,14 +364,15 @@ while not stopping:
             args.extend(['-map', '0:v:0'])
         if info["audio"] is not None:
             args.extend(["-map", "0:" + str(info["audio"]["index"])])
-        args.extend(branding['codec'] if branding else ["-c", "copy"])
+        args.extend(branding['codec'] if branding else ["-c:v", "copy"])
+        args.extend(audio_args(info["audio"]))
         args.extend(["-sn", "-dn"])
         if not branding and info["video"]["codec_name"] == "mpeg4":
             args.extend(["-bsf:v", "mpeg4_unpack_bframes"])
         if not branding and info["video"]["codec_name"] == "hevc" and SEGMENT_TYPE == "fmp4":
             args.extend(["-tag:v", "hvc1"])
         if branding and seek:
-            # Drop copied audio preroll after an accurate input seek.
+            # Align the output start after an accurate input seek.
             args.extend(["-ss", "0"])
         if "test_seconds" in CFG:
             args.extend(["-t", str(duration - seek)])
@@ -414,7 +416,7 @@ while not stopping:
                 output_video['height'] = branding['frame_height']
                 output_video['sample_aspect_ratio'] = '1:1'
                 output_video.pop('active_picture_crop', None)
-            state = {"channel": CFG["name"], "source": str(source), "position": position, "duration": info["duration"], "started_at": started_at, "updated_at": time.time(), "video": output_video, "source_video": info['video'], "audio": info["audio"], "title": title(source), "copyright": "Copyright Cyrius IPTV", "mode": "live_logo" if branding else "streamcopy", "container": SEGMENT_TYPE, "library_mode": "thematic_mix" if CFG.get('media_roots') else "folder"}
+            state = {"channel": CFG["name"], "source": str(source), "position": position, "duration": info["duration"], "started_at": started_at, "updated_at": time.time(), "video": output_video, "source_video": info['video'], "audio": output_audio(info["audio"]), "source_audio": info["audio"], "title": title(source), "copyright": "Copyright Cyrius IPTV", "mode": "live_logo" if branding else "streamcopy", "container": SEGMENT_TYPE, "library_mode": "thematic_mix" if CFG.get('media_roots') else "folder"}
             atomic_json(state_path, state)
             atomic_json(PUBLIC / "now.json", {k: v for k, v in state.items() if k != "source"})
             requested = requested_transition(files, position)

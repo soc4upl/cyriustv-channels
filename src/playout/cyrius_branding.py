@@ -63,7 +63,7 @@ def branding_args(channel, video, caption=None):
                   '-crf', '22', '-maxrate', '8000k', '-bufsize', '16000k',
                   '-threads:v', '2', '-pix_fmt', 'yuv420p', '-g', str(gop),
                   '-keyint_min', str(gop), '-sc_threshold', '0',
-                  '-force_key_frames', 'expr:gte(t,n_forced*4)', '-c:a', 'copy',
+                  '-force_key_frames', 'expr:gte(t,n_forced*4)',
                   '-max_muxing_queue_size', '2048'],
         'width': logo_width, 'margin_x': margin_x, 'margin_y': margin_y,
         'frame_width': width, 'frame_height': height,

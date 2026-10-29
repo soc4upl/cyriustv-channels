@@ -102,6 +102,21 @@ class Queue(unittest.TestCase):
             self.assertEqual(queue.arrange(paths,1), queue.arrange(paths,1))
 
 
+class Audio(unittest.TestCase):
+    def test_stable_aac_lc_stereo_for_source_codecs(self):
+        audio=load('audio_tests',ROOT/'src/playout/cyrius_audio.py')
+        for codec in ['ac3','eac3','dts','mp3','aac']:
+            source={'codec_name':codec,'channels':6,'tags':{'language':'rus'}}
+            args=audio.audio_args(source);out=audio.output_audio(source)
+            self.assertEqual(args[args.index('-c:a')+1],'aac')
+            self.assertEqual(args[args.index('-profile:a')+1],'aac_low')
+            self.assertEqual(args[args.index('-ar')+1],'48000')
+            self.assertEqual(args[args.index('-ac')+1],'2')
+            self.assertEqual(out['tags']['language'],'rus')
+            self.assertEqual(source['channels'],6)
+        self.assertEqual(audio.audio_args(None),['-an']);self.assertIsNone(audio.output_audio(None))
+
+
 @unittest.skipUnless(importlib.util.find_spec('PIL'), 'Pillow not installed')
 class Branding(unittest.TestCase):
     def test_supplied_logos_font_and_native_fps_overlay(self):
@@ -174,9 +189,11 @@ class Playout(unittest.TestCase):
                 # An externally generated synthetic fixture supports minimal FFmpeg builds without lavfi.
                 shutil.copy2(os.environ['CYRIUS_TEST_SAMPLE'],media/'one.mp4')
             else:
+                # Center-channel tone catches silent or incorrect 5.1-to-stereo downmixes.
                 subprocess.run([shutil.which('ffmpeg'),'-nostdin','-v','error','-f','lavfi','-i','color=s=320x180:r=25',
-                                '-f','lavfi','-i','anullsrc=r=48000:cl=stereo','-t','12','-c:v','libx264','-threads','1',
-                                '-g','25','-pix_fmt','yuv420p','-c:a','aac','-shortest',str(media/'one.mp4')],check=True)
+                                '-f','lavfi','-i','aevalsrc=0|0|0.25*sin(2*PI*440*t)|0|0|0:s=44100:c=5.1',
+                                '-t','12','-c:v','libx264','-threads','1','-g','25','-pix_fmt','yuv420p',
+                                '-c:a','ac3','-b:a','384k','-shortest',str(media/'one.mp4')],check=True)
             shutil.copy2(media/'one.mp4',media/'two.mp4')
             cfg={'enabled':True,'channels':[{'id':90,'name':'Isolated test','slug':'isolated-test','media':str(media),
                  'public':str(p/'public/90/live'),'segment_type':'mpegts','allowed_video_codecs':['h264']}]}
@@ -201,10 +218,24 @@ class Playout(unittest.TestCase):
                     wait(lambda:read(state).get('source')==str(media/'one.mp4') and manifest.exists(),proc)
                     self.assertTrue(manifest.stat().st_mode & 0o004)
                     fragment=next(line for line in manifest.read_text().splitlines() if line and not line.startswith('#'))
-                    self.assertTrue((manifest.parent/fragment).stat().st_mode & 0o004)
+                    fragment_path=manifest.parent/fragment
+                    self.assertTrue(fragment_path.stat().st_mode & 0o004)
+                    streams=json.loads(subprocess.check_output([shutil.which('ffprobe'),'-v','error','-show_streams','-of','json',str(fragment_path)],env=env))['streams']
+                    sound=next(s for s in streams if s['codec_type']=='audio')
+                    self.assertEqual((sound['codec_name'],sound['profile'],sound['sample_rate'],sound['channels']),('aac','LC','48000',2))
+                    pcm=subprocess.check_output([shutil.which('ffmpeg'),'-nostdin','-v','error','-i',str(fragment_path),'-t','1','-vn','-c:a','pcm_s16le','-f','s16le','pipe:1'],env=env)
+                    if not os.environ.get('CYRIUS_TEST_SAMPLE'):
+                        import array
+                        samples=array.array('h');samples.frombytes(pcm)
+                        self.assertGreater(max(map(abs,samples)),100)
+                    self.assertEqual(read(state)['audio']['codec_name'],'aac')
                     cmd={'id':'switch','at':time.time(),'action':'play','source':str(media/'two.mp4')}
                     queue.atomic(control/'command.json',cmd)
                     wait(lambda:read(state).get('source')==str(media/'two.mp4') and read(control/'ack.json').get('id')=='switch',proc)
+                    wait(lambda:any('run-' in line and line.split('/')[0]!=fragment.split('/')[0] for line in manifest.read_text().splitlines() if line and not line.startswith('#')),proc)
+                    next_fragment=next(line for line in reversed(manifest.read_text().splitlines()) if line and not line.startswith('#'))
+                    streams=json.loads(subprocess.check_output([shutil.which('ffprobe'),'-v','error','-show_streams','-of','json',str(manifest.parent/next_fragment)],env=env))['streams']
+                    self.assertTrue(any(s.get('codec_name')=='aac' and s.get('channels')==2 for s in streams))
                     queue.atomic(control/'command.json',{'id':'bad','at':time.time(),'action':'play','source':'/etc/passwd'})
                     wait(lambda:read(control/'ack.json').get('id')=='bad',proc);self.assertFalse(read(control/'ack.json')['ok'])
                     queue.atomic(control/'command.json',{'id':'expired','at':time.time()-200,'action':'next'})
